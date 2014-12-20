@@ -25,7 +25,7 @@ public enum MediaType {
   APPLICATION_ATOM_XML( "application/atom+xml" ),
   APPLICATION_XHTML_XML( "application/xhtml+xml" ),
   APPLICATION_SVG_XML( "application/svg+xml" ),
-  APPLICATION_JSON( "application/json;charset=utf-8" ),
+  APPLICATION_JSON( "application/json" ),
   APPLICATION_FORM_URLENCODED( "application/x-www-form-urlencoded" ),
   MULTIPART_FORM_DATA( "multipart/form-data" ),
   APPLICATION_OCTET_STREAM( "application/octet-stream" ),
@@ -33,6 +33,7 @@ public enum MediaType {
   TEXT_XML( "text/xml" ),
   TEXT_HTML( "text/html" );
 
+  
   private final String mimeType;
   
   private MediaType( String mimeType ) {
@@ -47,13 +48,23 @@ public enum MediaType {
    * <p>The <code>fromString()</code> method tries to convert a mime-type to the equivalent 
    * <code>MediaType</code>.</p>
    */
-  public static MediaType fromString( String type ) {
+  public static MediaType fromString( String type )
+  {
     MediaType result = null;
-    MediaType[] values = values();
-    for( MediaType value : values ) {
-      if( value.getMimeType().equals( type ) ) {
-        result = value;
-      }
+    if(type!=null)
+    {
+        MediaType[] values = values();
+        int sep =type.indexOf(';'); // Ignore trailing CharSet/Coding attributes
+        if(sep>=0)
+          type = type.substring(0, sep);
+
+        for( MediaType value : values )
+        {
+          if( type.toLowerCase().equals(value.getMimeType()) )
+          {
+            result = value;
+          }
+        }
     }
     return result;
   }
