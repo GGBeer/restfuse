@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011 Kevin Sawicki <kevinsawicki@gmail.com>
+ * Copyright (c) 2014 Kevin Sawicki <kevinsawicki@gmail.com>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to
@@ -24,9 +24,11 @@ package com.github.kevinsawicki.http;
 import static java.net.HttpURLConnection.HTTP_BAD_REQUEST;
 import static java.net.HttpURLConnection.HTTP_CREATED;
 import static java.net.HttpURLConnection.HTTP_INTERNAL_ERROR;
+import static java.net.HttpURLConnection.HTTP_NO_CONTENT;
 import static java.net.HttpURLConnection.HTTP_NOT_FOUND;
 import static java.net.HttpURLConnection.HTTP_NOT_MODIFIED;
 import static java.net.HttpURLConnection.HTTP_OK;
+import static java.net.Proxy.Type.HTTP;
 
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
@@ -49,6 +51,9 @@ import java.io.Reader;
 import java.io.UnsupportedEncodingException;
 import java.io.Writer;
 import java.net.HttpURLConnection;
+import java.net.InetSocketAddress;
+import java.net.MalformedURLException;
+import java.net.Proxy;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
@@ -70,6 +75,7 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.zip.GZIPInputStream;
 
 import javax.net.ssl.HostnameVerifier;
@@ -178,6 +184,16 @@ public class HttpRequest {
    * 'Location' header name
    */
   public static final String HEADER_LOCATION = "Location";
+
+  /**
+   * 'Proxy-Authorization' header name
+   */
+  public static final String HEADER_PROXY_AUTHORIZATION = "Proxy-Authorization";
+
+  /**
+   * 'Referer' header name
+   */
+  public static final String HEADER_REFERER = "Referer";
 
   /**
    * 'Server' header name
@@ -314,6 +330,72 @@ public class HttpRequest {
     else if (queryStart < lastChar && baseUrl.charAt(lastChar) != '&')
       result.append('&');
     return result;
+  }
+
+  /**
+   * Creates {@link HttpURLConnection HTTP connections} for
+   * {@link URL urls}.
+   */
+  public interface ConnectionFactory {
+    /**
+     * Open an {@link HttpURLConnection} for the specified {@link URL}.
+     *
+     * @throws IOException
+     */
+    HttpURLConnection create(URL url) throws IOException;
+
+    /**
+     * Open an {@link HttpURLConnection} for the specified {@link URL}
+     * and {@link Proxy}.
+     *
+     * @throws IOException
+     */
+    HttpURLConnection create(URL url, Proxy proxy) throws IOException;
+
+    /**
+     * A {@link ConnectionFactory} which uses the built-in
+     * {@link URL#openConnection()}
+     */
+    ConnectionFactory DEFAULT = new ConnectionFactory() {
+      public HttpURLConnection create(URL url) throws IOException {
+        return (HttpURLConnection) url.openConnection();
+      }
+
+      public HttpURLConnection create(URL url, Proxy proxy) throws IOException {
+        return (HttpURLConnection) url.openConnection(proxy);
+      }
+    };
+  }
+
+  private static ConnectionFactory CONNECTION_FACTORY = ConnectionFactory.DEFAULT;
+
+  /**
+   * Specify the {@link ConnectionFactory} used to create new requests.
+   */
+  public static void setConnectionFactory(final ConnectionFactory connectionFactory) {
+    if (connectionFactory == null)
+      CONNECTION_FACTORY = ConnectionFactory.DEFAULT;
+    else
+      CONNECTION_FACTORY = connectionFactory;
+  }
+
+  /**
+   * Callback interface for reporting upload progress for a request.
+   */
+  public interface UploadProgress {
+    /**
+     * Callback invoked as data is uploaded by the request.
+     *
+     * @param uploaded The number of bytes already uploaded
+     * @param total The total number of bytes that will be uploaded or -1 if
+     *              the length is unknown.
+     */
+    void onUpload(long uploaded, long total);
+
+    UploadProgress DEFAULT = new UploadProgress() {
+      public void onUpload(long uploaded, long total) {
+      }
+    };
   }
 
   /**
@@ -552,9 +634,11 @@ public class HttpRequest {
     private static final long serialVersionUID = -1170466989781746231L;
 
     /**
+     * Create a new HttpRequestException with the given cause
+     *
      * @param cause
      */
-    protected HttpRequestException(final IOException cause) {
+    public HttpRequestException(final IOException cause) {
       super(cause);
     }
 
@@ -743,8 +827,13 @@ public class HttpRequest {
       host = host + ':' + Integer.toString(port);
 
     try {
-      return new URI(parsed.getProtocol(), host, parsed.getPath(),
+      String encoded = new URI(parsed.getProtocol(), host, parsed.getPath(),
           parsed.getQuery(), null).toASCIIString();
+      int paramsStart = encoded.indexOf('?');
+      if (paramsStart > 0 && paramsStart + 1 < encoded.length())
+        encoded = encoded.substring(0, paramsStart + 1)
+                  + encoded.substring(paramsStart + 1).replace("+", "%2B");
+      return encoded;
     } catch (URISyntaxException e) {
       IOException io = new IOException("Parsing URI failed");
       io.initCause(e);
@@ -1208,7 +1297,7 @@ public class HttpRequest {
   /**
    * Set the 'http.keepAlive' property to the given value.
    * <p>
-   * This setting will apply to requests.
+   * This setting will apply to all requests.
    *
    * @param keepAlive
    */
@@ -1217,10 +1306,21 @@ public class HttpRequest {
   }
 
   /**
+   * Set the 'http.maxConnections' property to the given value.
+   * <p>
+   * This setting will apply to all requests.
+   *
+   * @param maxConnections
+   */
+  public static void maxConnections(final int maxConnections) {
+    setProperty("http.maxConnections", Integer.toString(maxConnections));
+  }
+
+  /**
    * Set the 'http.proxyHost' & 'https.proxyHost' properties to the given host
    * value.
    * <p>
-   * This setting will apply to requests.
+   * This setting will apply to all requests.
    *
    * @param host
    */
@@ -1233,7 +1333,7 @@ public class HttpRequest {
    * Set the 'http.proxyPort' & 'https.proxyPort' properties to the given port
    * number.
    * <p>
-   * This setting will apply to requests.
+   * This setting will apply to all requests.
    *
    * @param port
    */
@@ -1248,7 +1348,7 @@ public class HttpRequest {
    * <p>
    * Hosts will be separated by a '|' character.
    * <p>
-   * This setting will apply to requests.
+   * This setting will apply to all requests.
    *
    * @param hosts
    */
@@ -1273,7 +1373,7 @@ public class HttpRequest {
    * @param value
    * @return previous value
    */
-  private static final String setProperty(final String name, final String value) {
+  private static String setProperty(final String name, final String value) {
     final PrivilegedAction<String> action;
     if (value != null)
       action = new PrivilegedAction<String>() {
@@ -1292,7 +1392,11 @@ public class HttpRequest {
     return AccessController.doPrivileged(action);
   }
 
-  private final HttpURLConnection connection;
+  private HttpURLConnection connection = null;
+
+  private final URL url;
+
+  private final String requestMethod;
 
   private RequestOutputStream output;
 
@@ -1306,35 +1410,59 @@ public class HttpRequest {
 
   private int bufferSize = 8192;
 
+  private long totalSize = -1;
+
+  private long totalWritten = 0;
+
+  private String httpProxyHost;
+
+  private int httpProxyPort;
+
+  private UploadProgress progress = UploadProgress.DEFAULT;
+
   /**
    * Create HTTP connection wrapper
    *
-   * @param url
-   * @param method
+   * @param url Remote resource URL.
+   * @param method HTTP request method (e.g., "GET", "POST").
    * @throws HttpRequestException
    */
   public HttpRequest(final CharSequence url, final String method)
       throws HttpRequestException {
     try {
-      connection = (HttpURLConnection) new URL(url.toString()).openConnection();
-      connection.setRequestMethod(method);
-    } catch (IOException e) {
+      this.url = new URL(url.toString());
+    } catch (MalformedURLException e) {
       throw new HttpRequestException(e);
     }
+    this.requestMethod = method;
   }
 
   /**
    * Create HTTP connection wrapper
    *
-   * @param url
-   * @param method
+   * @param url Remote resource URL.
+   * @param method HTTP request method (e.g., "GET", "POST").
    * @throws HttpRequestException
    */
   public HttpRequest(final URL url, final String method)
       throws HttpRequestException {
+    this.url = url;
+    this.requestMethod = method;
+  }
+
+  private Proxy createProxy() {
+    return new Proxy(HTTP, new InetSocketAddress(httpProxyHost, httpProxyPort));
+  }
+
+  private HttpURLConnection createConnection() {
     try {
-      connection = (HttpURLConnection) url.openConnection();
-      connection.setRequestMethod(method);
+      final HttpURLConnection connection;
+      if (httpProxyHost != null)
+        connection = CONNECTION_FACTORY.create(url, createProxy());
+      else
+        connection = CONNECTION_FACTORY.create(url);
+      connection.setRequestMethod(requestMethod);
+      return connection;
     } catch (IOException e) {
       throw new HttpRequestException(e);
     }
@@ -1342,7 +1470,7 @@ public class HttpRequest {
 
   @Override
   public String toString() {
-    return connection.getRequestMethod() + ' ' + connection.getURL();
+    return method() + ' ' + url();
   }
 
   /**
@@ -1351,6 +1479,8 @@ public class HttpRequest {
    * @return connection
    */
   public HttpURLConnection getConnection() {
+    if (connection == null)
+      connection = createConnection();
     return connection;
   }
 
@@ -1387,7 +1517,7 @@ public class HttpRequest {
   public int code() throws HttpRequestException {
     try {
       closeOutput();
-      return connection.getResponseCode();
+      return getConnection().getResponseCode();
     } catch (IOException e) {
       throw new HttpRequestException(e);
     }
@@ -1425,6 +1555,16 @@ public class HttpRequest {
    */
   public boolean created() throws HttpRequestException {
     return HTTP_CREATED == code();
+  }
+
+  /**
+   * Is the response code a 204 No Content?
+   *
+   * @return true if 204, false otherwise
+   * @throws HttpRequestException
+   */
+  public boolean noContent() throws HttpRequestException {
+    return HTTP_NO_CONTENT == code();
   }
 
   /**
@@ -1476,7 +1616,7 @@ public class HttpRequest {
   public String message() throws HttpRequestException {
     try {
       closeOutput();
-      return connection.getResponseMessage();
+      return getConnection().getResponseMessage();
     } catch (IOException e) {
       throw new HttpRequestException(e);
     }
@@ -1488,7 +1628,7 @@ public class HttpRequest {
    * @return this request
    */
   public HttpRequest disconnect() {
-    connection.disconnect();
+    getConnection().disconnect();
     return this;
   }
 
@@ -1499,7 +1639,7 @@ public class HttpRequest {
    * @return this request
    */
   public HttpRequest chunk(final int size) {
-    connection.setChunkedStreamingMode(size);
+    getConnection().setChunkedStreamingMode(size);
     return this;
   }
 
@@ -1600,6 +1740,34 @@ public class HttpRequest {
   }
 
   /**
+   * Get the response body as a {@link String} and set it as the value of the
+   * given reference.
+   *
+   * @param output
+   * @return this request
+   * @throws HttpRequestException
+   */
+  public HttpRequest body(final AtomicReference<String> output) throws HttpRequestException {
+    output.set(body());
+    return this;
+  }
+
+  /**
+   * Get the response body as a {@link String} and set it as the value of the
+   * given reference.
+   *
+   * @param output
+   * @param charset
+   * @return this request
+   * @throws HttpRequestException
+   */
+  public HttpRequest body(final AtomicReference<String> output, final String charset) throws HttpRequestException {
+    output.set(body(charset));
+    return this;
+  }
+
+
+  /**
    * Is the response body empty?
    *
    * @return true if the Content-Length response header is 0, false otherwise
@@ -1646,17 +1814,20 @@ public class HttpRequest {
     InputStream stream;
     if (code() < HTTP_BAD_REQUEST)
       try {
-        stream = connection.getInputStream();
+        stream = getConnection().getInputStream();
       } catch (IOException e) {
         throw new HttpRequestException(e);
       }
     else {
-      stream = connection.getErrorStream();
+      stream = getConnection().getErrorStream();
       if (stream == null)
         try {
-          stream = connection.getInputStream();
+          stream = getConnection().getInputStream();
         } catch (IOException e) {
-          throw new HttpRequestException(e);
+          if (contentLength() > 0)
+            throw new HttpRequestException(e);
+          else
+            stream = new ByteArrayInputStream(new byte[0]);
         }
     }
 
@@ -1829,7 +2000,7 @@ public class HttpRequest {
    * @return this request
    */
   public HttpRequest readTimeout(final int timeout) {
-    connection.setReadTimeout(timeout);
+    getConnection().setReadTimeout(timeout);
     return this;
   }
 
@@ -1840,7 +2011,7 @@ public class HttpRequest {
    * @return this request
    */
   public HttpRequest connectTimeout(final int timeout) {
-    connection.setConnectTimeout(timeout);
+    getConnection().setConnectTimeout(timeout);
     return this;
   }
 
@@ -1852,7 +2023,7 @@ public class HttpRequest {
    * @return this request
    */
   public HttpRequest header(final String name, final String value) {
-    connection.setRequestProperty(name, value);
+    getConnection().setRequestProperty(name, value);
     return this;
   }
 
@@ -1900,7 +2071,7 @@ public class HttpRequest {
    */
   public String header(final String name) throws HttpRequestException {
     closeOutputQuietly();
-    return connection.getHeaderField(name);
+    return getConnection().getHeaderField(name);
   }
 
   /**
@@ -1911,7 +2082,7 @@ public class HttpRequest {
    */
   public Map<String, List<String>> headers() throws HttpRequestException {
     closeOutputQuietly();
-    return connection.getHeaderFields();
+    return getConnection().getHeaderFields();
   }
 
   /**
@@ -1938,7 +2109,7 @@ public class HttpRequest {
   public long dateHeader(final String name, final long defaultValue)
       throws HttpRequestException {
     closeOutputQuietly();
-    return connection.getHeaderFieldDate(name, defaultValue);
+    return getConnection().getHeaderFieldDate(name, defaultValue);
   }
 
   /**
@@ -1966,7 +2137,7 @@ public class HttpRequest {
   public int intHeader(final String name, final int defaultValue)
       throws HttpRequestException {
     closeOutputQuietly();
-    return connection.getHeaderFieldInt(name, defaultValue);
+    return getConnection().getHeaderFieldInt(name, defaultValue);
   }
 
   /**
@@ -2111,11 +2282,21 @@ public class HttpRequest {
   /**
    * Set the 'User-Agent' header to given value
    *
-   * @param value
+   * @param userAgent
    * @return this request
    */
-  public HttpRequest userAgent(final String value) {
-    return header(HEADER_USER_AGENT, value);
+  public HttpRequest userAgent(final String userAgent) {
+    return header(HEADER_USER_AGENT, userAgent);
+  }
+
+  /**
+   * Set the 'Referer' header to given value
+   *
+   * @param referer
+   * @return this request
+   */
+  public HttpRequest referer(final String referer) {
+    return header(HEADER_REFERER, referer);
   }
 
   /**
@@ -2125,18 +2306,18 @@ public class HttpRequest {
    * @return this request
    */
   public HttpRequest useCaches(final boolean useCaches) {
-    connection.setUseCaches(useCaches);
+    getConnection().setUseCaches(useCaches);
     return this;
   }
 
   /**
    * Set the 'Accept-Encoding' header to given value
    *
-   * @param value
+   * @param acceptEncoding
    * @return this request
    */
-  public HttpRequest acceptEncoding(final String value) {
-    return header(HEADER_ACCEPT_ENCODING, value);
+  public HttpRequest acceptEncoding(final String acceptEncoding) {
+    return header(HEADER_ACCEPT_ENCODING, acceptEncoding);
   }
 
   /**
@@ -2152,11 +2333,11 @@ public class HttpRequest {
   /**
    * Set the 'Accept-Charset' header to given value
    *
-   * @param value
+   * @param acceptCharset
    * @return this request
    */
-  public HttpRequest acceptCharset(final String value) {
-    return header(HEADER_ACCEPT_CHARSET, value);
+  public HttpRequest acceptCharset(final String acceptCharset) {
+    return header(HEADER_ACCEPT_CHARSET, acceptCharset);
   }
 
   /**
@@ -2234,11 +2415,21 @@ public class HttpRequest {
   /**
    * Set the 'Authorization' header to given value
    *
-   * @param value
+   * @param authorization
    * @return this request
    */
-  public HttpRequest authorization(final String value) {
-    return header(HEADER_AUTHORIZATION, value);
+  public HttpRequest authorization(final String authorization) {
+    return header(HEADER_AUTHORIZATION, authorization);
+  }
+
+  /**
+   * Set the 'Proxy-Authorization' header to given value
+   *
+   * @param proxyAuthorization
+   * @return this request
+   */
+  public HttpRequest proxyAuthorization(final String proxyAuthorization) {
+    return header(HEADER_PROXY_AUTHORIZATION, proxyAuthorization);
   }
 
   /**
@@ -2254,49 +2445,61 @@ public class HttpRequest {
   }
 
   /**
-   * Set the 'If-Modified-Since' request header to the given value
+   * Set the 'Proxy-Authorization' header to given values in Basic authentication
+   * format
    *
-   * @param value
+   * @param name
+   * @param password
    * @return this request
    */
-  public HttpRequest ifModifiedSince(final long value) {
-    connection.setIfModifiedSince(value);
+  public HttpRequest proxyBasic(final String name, final String password) {
+    return proxyAuthorization("Basic " + Base64.encode(name + ':' + password));
+  }
+
+  /**
+   * Set the 'If-Modified-Since' request header to the given value
+   *
+   * @param ifModifiedSince
+   * @return this request
+   */
+  public HttpRequest ifModifiedSince(final long ifModifiedSince) {
+    getConnection().setIfModifiedSince(ifModifiedSince);
     return this;
   }
 
   /**
    * Set the 'If-None-Match' request header to the given value
    *
-   * @param value
+   * @param ifNoneMatch
    * @return this request
    */
-  public HttpRequest ifNoneMatch(final String value) {
-    return header(HEADER_IF_NONE_MATCH, value);
+  public HttpRequest ifNoneMatch(final String ifNoneMatch) {
+    return header(HEADER_IF_NONE_MATCH, ifNoneMatch);
   }
 
   /**
    * Set the 'Content-Type' request header to the given value
    *
-   * @param value
+   * @param contentType
    * @return this request
    */
-  public HttpRequest contentType(final String value) {
-    return contentType(value, null);
+  public HttpRequest contentType(final String contentType) {
+    return contentType(contentType, null);
   }
 
   /**
    * Set the 'Content-Type' request header to the given value and charset
    *
-   * @param value
+   * @param contentType
    * @param charset
    * @return this request
    */
-  public HttpRequest contentType(final String value, final String charset) {
+  public HttpRequest contentType(final String contentType, final String charset) {
     if (charset != null && charset.length() > 0) {
       final String separator = "; " + PARAM_CHARSET + '=';
-      return header(HEADER_CONTENT_TYPE, value + separator + charset);
+      return header(HEADER_CONTENT_TYPE, contentType + separator + charset);
     } else
-      return header(HEADER_CONTENT_TYPE, value);
+      return header(HEADER_CONTENT_TYPE, contentType);
   }
 
   /**
@@ -2320,32 +2523,32 @@ public class HttpRequest {
   /**
    * Set the 'Content-Length' request header to the given value
    *
-   * @param value
+   * @param contentLength
    * @return this request
    */
-  public HttpRequest contentLength(final String value) {
-    return contentLength(Integer.parseInt(value));
+  public HttpRequest contentLength(final String contentLength) {
+    return contentLength(Integer.parseInt(contentLength));
   }
 
   /**
    * Set the 'Content-Length' request header to the given value
    *
-   * @param value
+   * @param contentLength
    * @return this request
    */
-  public HttpRequest contentLength(final int value) {
-    connection.setFixedLengthStreamingMode(value);
+  public HttpRequest contentLength(final int contentLength) {
+    getConnection().setFixedLengthStreamingMode(contentLength);
     return this;
   }
 
   /**
    * Set the 'Accept' header to given value
    *
-   * @param value
+   * @param accept
    * @return this request
    */
-  public HttpRequest accept(final String value) {
-    return header(HEADER_ACCEPT, value);
+  public HttpRequest accept(final String accept) {
+    return header(HEADER_ACCEPT, accept);
   }
 
   /**
@@ -2373,8 +2576,11 @@ public class HttpRequest {
       public HttpRequest run() throws IOException {
         final byte[] buffer = new byte[bufferSize];
         int read;
-        while ((read = input.read(buffer)) != -1)
+        while ((read = input.read(buffer)) != -1) {
           output.write(buffer, 0, read);
+          totalWritten += read;
+          progress.onUpload(totalWritten, totalSize);
+        }
         return HttpRequest.this;
       }
     }.call();
@@ -2396,11 +2602,35 @@ public class HttpRequest {
       public HttpRequest run() throws IOException {
         final char[] buffer = new char[bufferSize];
         int read;
-        while ((read = input.read(buffer)) != -1)
+        while ((read = input.read(buffer)) != -1) {
           output.write(buffer, 0, read);
+          totalWritten += read;
+          progress.onUpload(totalWritten, -1);
+        }
         return HttpRequest.this;
       }
     }.call();
+  }
+
+  /**
+   * Set the UploadProgress callback for this request
+   *
+   * @param callback
+   * @return this request
+   */
+  public HttpRequest progress(final UploadProgress callback) {
+    if (callback == null)
+      progress = UploadProgress.DEFAULT;
+    else
+      progress = callback;
+    return this;
+  }
+
+  private HttpRequest incrementTotalSize(final long size) {
+    if (totalSize == -1)
+      totalSize = 0;
+    totalSize += size;
+    return this;
   }
 
   /**
@@ -2411,6 +2641,7 @@ public class HttpRequest {
    * @throws IOException
    */
   protected HttpRequest closeOutput() throws IOException {
+    progress(null);
     if (output == null)
       return this;
     if (multipart)
@@ -2451,10 +2682,10 @@ public class HttpRequest {
   protected HttpRequest openOutput() throws IOException {
     if (output != null)
       return this;
-    connection.setDoOutput(true);
+    getConnection().setDoOutput(true);
     final String charset = getParam(
-        connection.getRequestProperty(HEADER_CONTENT_TYPE), PARAM_CHARSET);
-    output = new RequestOutputStream(connection.getOutputStream(), charset,
+        getConnection().getRequestProperty(HEADER_CONTENT_TYPE), PARAM_CHARSET);
+    output = new RequestOutputStream(getConnection().getOutputStream(), charset,
         bufferSize);
     return this;
   }
@@ -2628,6 +2859,7 @@ public class HttpRequest {
     final InputStream stream;
     try {
       stream = new BufferedInputStream(new FileInputStream(part));
+      incrementTotalSize(part.length());
     } catch (IOException e) {
       throw new HttpRequestException(e);
     }
@@ -2695,6 +2927,7 @@ public class HttpRequest {
     final InputStream stream;
     try {
       stream = new BufferedInputStream(new FileInputStream(input));
+      incrementTotalSize(input.length());
     } catch (FileNotFoundException e) {
       throw new HttpRequestException(e);
     }
@@ -2709,6 +2942,8 @@ public class HttpRequest {
    * @throws HttpRequestException
    */
   public HttpRequest send(final byte[] input) throws HttpRequestException {
+    if (input != null)
+      incrementTotalSize(input.length);
     return send(new ByteArrayInputStream(input));
   }
 
@@ -2911,6 +3146,7 @@ public class HttpRequest {
    * @throws HttpRequestException
    */
   public HttpRequest trustAllCerts() throws HttpRequestException {
+    final HttpURLConnection connection = getConnection();
     if (connection instanceof HttpsURLConnection)
       ((HttpsURLConnection) connection)
           .setSSLSocketFactory(getTrustedFactory());
@@ -2927,9 +3163,57 @@ public class HttpRequest {
    * @return this request
    */
   public HttpRequest trustAllHosts() {
+    final HttpURLConnection connection = getConnection();
     if (connection instanceof HttpsURLConnection)
       ((HttpsURLConnection) connection)
           .setHostnameVerifier(getTrustedVerifier());
+    return this;
+  }
+
+  /**
+   * Get the {@link URL} of this request's connection
+   *
+   * @return request URL
+   */
+  public URL url() {
+    return getConnection().getURL();
+  }
+
+  /**
+   * Get the HTTP method of this request
+   *
+   * @return method
+   */
+  public String method() {
+    return getConnection().getRequestMethod();
+  }
+
+  /**
+   * Configure an HTTP proxy on this connection. Use {{@link #proxyBasic(String, String)} if
+   * this proxy requires basic authentication.
+   *
+   * @param proxyHost
+   * @param proxyPort
+   * @return this request
+   */
+  public HttpRequest useProxy(final String proxyHost, final int proxyPort) {
+    if (connection != null)
+      throw new IllegalStateException("The connection has already been created. This method must be called before reading or writing to the request.");
+
+    this.httpProxyHost = proxyHost;
+    this.httpProxyPort = proxyPort;
+    return this;
+  }
+
+  /**
+   * Set whether or not the underlying connection should follow redirects in
+   * the response.
+   *
+   * @param followRedirects - true fo follow redirects, false to not.
+   * @return this request
+   */
+  public HttpRequest followRedirects(final boolean followRedirects) {
+    getConnection().setInstanceFollowRedirects(followRedirects);
     return this;
   }
 }
