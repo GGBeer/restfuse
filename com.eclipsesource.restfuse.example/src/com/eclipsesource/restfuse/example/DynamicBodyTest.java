@@ -10,6 +10,7 @@
  ******************************************************************************/
 package com.eclipsesource.restfuse.example;
 
+import org.junit.Ignore;
 import org.junit.Rule;
 import org.junit.runner.RunWith;
 
@@ -31,6 +32,7 @@ import com.eclipsesource.restfuse.annotation.HttpTest;
  * @author mihm
  * 
  */
+
 @RunWith(HttpJUnitRunner.class)
 public class DynamicBodyTest {
 
@@ -59,10 +61,10 @@ public class DynamicBodyTest {
 	}
 
 	private Destination getDestination() {
-		Destination destination = new Destination(this, "http://localhost");
+		Destination destination = new Destination(this, "http://localhost:8080");
 		RequestContext context = destination.getRequestContext();
 		if (requestBody != null) {
-			context.setDynamicBody(requestBody);
+			context.setContentStr(requestBody);
 		}
 		return destination;
 	}

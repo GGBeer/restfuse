@@ -37,9 +37,9 @@ public class Destination_Test {
   
   @Test( expected = IllegalArgumentException.class )
   public void testBaseUrlCannotBeNull() {
-    new Destination( this, null );
+    new Destination( this, (String) null );
   }
-  
+
   @Test( expected = IllegalArgumentException.class )
   public void testBaseUrlHasToBeAnUrl() {
     new Destination( this, "foo" );
@@ -49,7 +49,10 @@ public class Destination_Test {
   public void testTestObjectIsNull() throws Exception {
     new Destination( null, "http://localhost" );
   }
-  
+
+  @Test( expected = IllegalArgumentException.class )
+  public void testRequestContextCannotBeNull() { new Destination( this, (RequestContext) null ); }
+
   @Test
   public void testApplyReturnsBaseWhenNoAnnotationsPresent() {
     Statement base = mock( Statement.class );
