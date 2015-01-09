@@ -142,6 +142,17 @@ public class HttpTestStatement_Test {
       }
       
       @Override
+      public String processrequest() {
+        return "";
+      }
+
+      @Override
+      public String[] requestObjectKeys()
+      {
+          return null;
+      }
+
+      @Override
       public Authentication[] authentications() {
         return null;
       }

@@ -56,7 +56,6 @@ import com.eclipsesource.restfuse.internal.HttpTestStatement;
 public class Destination implements TestRule {
 
   private HttpTestStatement requestStatement;
-  private final String baseUrl;
   private String proxyHost;
   private int proxyPort;
   private RequestContext context;
@@ -72,11 +71,10 @@ public class Destination implements TestRule {
    * not a valid url.
    */
   public Destination( Object testObject, String baseUrl) {
-    checkBaseUrl( baseUrl );
+    checkBaseUrl(baseUrl);
     checkTestObject( testObject );
     this.testObject = testObject;
-    this.baseUrl = baseUrl;
-    this.context = new RequestContext();
+    this.context = new RequestContext(testObject, baseUrl);
   }
   
   /**
@@ -97,7 +95,25 @@ public class Destination implements TestRule {
     this( testObject, baseUrl );
     this.proxyHost = proxyHost;
     this.proxyPort = proxyPort;
-    this.context = new RequestContext();
+  }
+
+  
+  /**
+   * <p>Constructs a new <code>Destination</code> object. An requestContext is needed as parameter which will
+   * be used in the whole test to create requests.</p>
+   * 
+   * @param requestContext The requestContext containing further Destination parameters.
+   * 
+   * @throws IllegalArgumentException Will be thrown when the <code>requestContext</code> is null.
+   */
+  public Destination( Object testObject, RequestContext requestContext)
+  {
+    checkTestObject( testObject );
+    checkRequestContext(requestContext);
+    checkBaseUrl(requestContext.getBaseUrl());
+
+    this.testObject = testObject;
+    this.context = requestContext;
   }
 
   /**
@@ -125,14 +141,24 @@ public class Destination implements TestRule {
     }
   }
 
-  @Override
+  private void checkRequestContext( RequestContext requestContext ) {
+      if( requestContext == null ) {
+          throw new IllegalArgumentException( "requestContext must not be null." );
+      }
+  }
+
+    @Override
   /**
    * <p><b>Not meant for public use. This method will be invoked by the JUnit framework.</b></p>
    */
   public Statement apply( Statement base, Description description ) {
     Statement result;
-    if( hasAnnotation( description ) ) {
-      requestStatement = new HttpTestStatement( base, description, testObject, baseUrl, proxyHost, proxyPort, context );
+    if( hasHttpTestAnnotation(description) )
+    {
+      // In case the context.TestName has not been set, context was not processed as a JUnit-Rule and its internal fields are not populated correctly i.e. just call apply() here instead.
+      if(context.getTestName()== null)
+           context.apply(base, description);
+      requestStatement = new HttpTestStatement( base, description, testObject, context.getBaseUrl(), proxyHost, proxyPort, context );
       result = requestStatement;
     } else {
       result = base;
@@ -140,7 +166,7 @@ public class Destination implements TestRule {
     return result;
   }
 
-  private boolean hasAnnotation( Description description ) {
+  private boolean hasHttpTestAnnotation(Description description) {
     return description.getAnnotation( HttpTest.class ) != null;
   }
 

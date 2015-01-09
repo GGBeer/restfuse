@@ -19,6 +19,7 @@ import java.io.UnsupportedEncodingException;
 import java.util.List;
 import java.util.Map;
 
+import com.eclipsesource.restfuse.*;
 import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.servlet.ServletContextHandler;
 import org.eclipse.jetty.servlet.ServletHolder;
@@ -26,11 +27,6 @@ import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
-import com.eclipsesource.restfuse.AuthenticationType;
-import com.eclipsesource.restfuse.DefaultCallbackResource;
-import com.eclipsesource.restfuse.MediaType;
-import com.eclipsesource.restfuse.Request;
-import com.eclipsesource.restfuse.Response;
 import com.eclipsesource.restfuse.internal.callback.CallbackSerlvet;
 import com.eclipsesource.restfuse.internal.callback.CallbackStatement;
 
@@ -168,8 +164,8 @@ public class InternalRequest_Test {
   }
 
   private InternalRequest createRequest() throws UnsupportedEncodingException {
-    InternalRequest internalRequest = new InternalRequest( "http://localhost:10042/test" );
-    internalRequest.setContent( new ByteArrayInputStream( "test".getBytes( "UTF-8" ) ) );
+    InternalRequest internalRequest = new InternalRequest( new RequestContext(this, "http://localhost:10042/test") );
+    internalRequest.setBody("test");
     internalRequest.setContentType( MediaType.TEXT_PLAIN.getMimeType() );
     internalRequest.addHeader( "test", "test" );
     AuthenticationInfo authentication 

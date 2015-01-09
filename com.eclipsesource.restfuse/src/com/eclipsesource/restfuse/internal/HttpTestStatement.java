@@ -111,7 +111,7 @@ public class HttpTestStatement extends Statement {
   }
 
   private Response callService( InternalRequest request ) {
-    Method requestMethod = description.getAnnotation( HttpTest.class ).method();
+    Method requestMethod = request.getRequestMethod();
     Response result = null;
     if( requestMethod.equals( Method.GET ) ) {
       result = request.get();

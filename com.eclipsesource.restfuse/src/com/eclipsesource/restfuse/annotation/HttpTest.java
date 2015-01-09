@@ -105,6 +105,19 @@ public @interface HttpTest {
    * If both are defined the <code>file</code> attribute wins.</p>
    */
   String content() default EMPTY;
+  
+  /**
+   * <p>When the request can have an entity like POST or PUT requests the content can be set directly by the 
+   * <code>file</code> or <code>content</code> attribute or be modified in the getDestination() call by the <code>setDynamicBody()</code> method.
+   * The class defined by the <code>processrequest</code> field will process/transform the available request-content by using the  Request Context as an input.</p>
+   */
+  String processrequest() default EMPTY;
+
+    /**
+     * <p>List keys to the RequestObject items to be included via the RequestContext <code>addRequestObject()</code> method.
+     * To be used as test specific input to the <code>processrequest</code></p>
+     */
+  String[] requestObjectKeys() default {};
 
   /**
    * <p>With the <code>headers</code> the request headers can be set.</p>
@@ -132,6 +145,9 @@ public @interface HttpTest {
    */
   int order() default 0;
   
+  /**
+   * 
+   */
   static final String EMPTY = "";
 
 }
